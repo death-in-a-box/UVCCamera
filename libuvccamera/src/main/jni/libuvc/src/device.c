@@ -67,8 +67,10 @@ int uvc_already_open(uvc_context_t *ctx, struct libusb_device *usb_dev);
 void uvc_free_devh(uvc_device_handle_t *devh);
 
 uvc_error_t uvc_get_device_info(uvc_device_t *dev, uvc_device_info_t **info);
+uvc_error_t uvc_get_internal_info(uvc_device_t *dev, uvc_device_info_t **info);
 void uvc_free_device_info(uvc_device_info_t *info);
 
+uvc_error_t uvc_scan_control_num(uvc_device_info_t *info, int *inter_num);
 uvc_error_t uvc_scan_control(uvc_device_t *dev, uvc_device_info_t *info);
 uvc_error_t uvc_parse_vc(uvc_device_t *dev, uvc_device_info_t *info,
 		const unsigned char *block, size_t block_size);
@@ -359,6 +361,36 @@ fail2:
 }
 
 /**
+ *
+ */
+uvc_error_t uvc_get_internal_info(uvc_device_t *dev, uvc_device_info_t **info) {
+    uvc_error_t ret;
+    uvc_device_info_t *internal_info;
+
+    UVC_ENTER();
+
+    internal_info = calloc(1, sizeof(*internal_info));
+    if (!internal_info) {
+        UVC_EXIT(UVC_ERROR_NO_MEM);
+        return UVC_ERROR_NO_MEM;
+    }
+    if (libusb_get_config_descriptor(dev->usb_dev, 0, &(internal_info->config)) != 0) {
+//	if (libusb_get_active_config_descriptor(dev->usb_dev, &(internal_info->config)) != 0) {
+        // XXX assume libusb_get_active_config_descriptor　is better
+        // but some buggy device will return error when get active config.
+        // so we will use libusb_get_config_descriptor...
+        free(internal_info);
+        UVC_EXIT(UVC_ERROR_IO);
+        return UVC_ERROR_IO;
+    }
+
+    *info = internal_info;
+
+    UVC_EXIT(ret);
+    return ret;
+}
+
+/**
  * @internal
  * @brief Parses the complete device descriptor for a device
  * @ingroup device
@@ -373,20 +405,11 @@ uvc_error_t uvc_get_device_info(uvc_device_t *dev, uvc_device_info_t **info) {
 
 	UVC_ENTER();
 
-	internal_info = calloc(1, sizeof(*internal_info));
-	if (!internal_info) {
-		UVC_EXIT(UVC_ERROR_NO_MEM);
-		return UVC_ERROR_NO_MEM;
-	}
-	if (libusb_get_config_descriptor(dev->usb_dev, 0, &(internal_info->config)) != 0) {
-//	if (libusb_get_active_config_descriptor(dev->usb_dev, &(internal_info->config)) != 0) {
-		// XXX assume libusb_get_active_config_descriptor　is better
-		// but some buggy device will return error when get active config.
-		// so we will use libusb_get_config_descriptor...
-		free(internal_info);
-		UVC_EXIT(UVC_ERROR_IO);
-		return UVC_ERROR_IO;
-	}
+	ret = uvc_get_internal_info(dev, &internal_info);
+    if (UNLIKELY(ret)) {
+        UVC_EXIT(ret);
+        return ret;
+    }
 
 	ret = uvc_scan_control(dev, internal_info);
 	if (UNLIKELY(ret)) {
@@ -897,6 +920,49 @@ uvc_error_t uvc_release_if(uvc_device_handle_t *devh, int idx) {
 	return ret;
 }
 
+/**
+ *
+ */
+uvc_error_t uvc_scan_control_num(uvc_device_info_t *info, int *inter_num) {
+	const struct libusb_interface_descriptor *if_desc;
+	int interface_idx;
+	int interface_counter;
+
+	UVC_ENTER();
+
+	if_desc = NULL;
+	interface_counter = 0;
+
+	if (LIKELY(info && info->config)) {	// XXX add to avoid crash
+		MARK("bNumInterfaces=%d", info->config->bNumInterfaces);
+		for (interface_idx = 0; interface_idx < info->config->bNumInterfaces; ++interface_idx) {
+			if_desc = &info->config->interface[interface_idx].altsetting[0];
+			MARK("interface_idx=%d:bInterfaceClass=%02x,bInterfaceSubClass=%02x", interface_idx, if_desc->bInterfaceClass, if_desc->bInterfaceSubClass);
+			if (if_desc->bInterfaceClass == LIBUSB_CLASS_VIDEO/*14*/ && if_desc->bInterfaceSubClass == 1) // Video, Control
+				interface_counter++;
+
+			// Another TIS camera hack.
+			else if (if_desc->bInterfaceClass == 255 && if_desc->bInterfaceSubClass == 1) {
+				uvc_device_descriptor_t* dev_desc;
+				int haveTISCamera = 0;
+				uvc_get_device_descriptor (dev, &dev_desc);
+				if (dev_desc->idVendor == 0x199e && dev_desc->idProduct == 0x8101) {
+					haveTISCamera = 1;
+				}
+				uvc_free_device_descriptor (dev_desc);
+				if (haveTISCamera) {
+					interface_counter++;
+				}
+			}
+			if_desc = NULL;
+		}
+	}
+	*inter_num = interface_counter;
+
+	UVC_EXIT(ret);
+	return ret;
+}
+
 /** @internal
  * Find a device's VideoControl interface and process its descriptor
  * @ingroup device
@@ -966,8 +1032,8 @@ uvc_error_t uvc_scan_control(uvc_device_t *dev, uvc_device_info_t *info) {
 		buffer += block_size;
 	}
 
-	UVC_EXIT(ret);
-	return ret;
+	UVC_EXIT(UVC_SUCCESS);
+	return UVC_SUCCESS;
 }
 
 /** @internal
