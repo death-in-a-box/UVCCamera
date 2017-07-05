@@ -157,6 +157,23 @@ static jint nativeConnect(JNIEnv *env, jobject thiz,
 	RETURN(result, jint);
 }
 
+static jint nativeConnectDIB(JNIEnv *env, jobject thiz,
+	ID_TYPE id_camera,
+	jint vid, jint pid, jint fd,
+	jint busNum, jint devAddr, jstring usbfs_str, jint interface_number) {
+
+	ENTER();
+	int result = JNI_ERR;
+	UVCCamera *camera = reinterpret_cast<UVCCamera *>(id_camera);
+	const char *c_usbfs = env->GetStringUTFChars(usbfs_str, JNI_FALSE);
+	if (LIKELY(camera && (fd > 0))) {
+//		libusb_set_debug(NULL, LIBUSB_LOG_LEVEL_DEBUG);
+		result =  camera->connect(vid, pid, fd, busNum, devAddr, c_usbfs, interface_number);
+	}
+	env->ReleaseStringUTFChars(usbfs_str, c_usbfs);
+	RETURN(result, jint);
+}
+
 // カメラとの接続を解除
 static jint nativeRelease(JNIEnv *env, jobject thiz,
 	ID_TYPE id_camera) {
@@ -2016,6 +2033,7 @@ static JNINativeMethod methods[] = {
 	{ "nativeCreate",					"()J", (void *) nativeCreate },
 	{ "nativeDestroy",					"(J)V", (void *) nativeDestroy },
 	//
+	{ "nativeConnectDIB",					"(JIIIIILjava/lang/String;I)I", (void *) nativeConnectDIB }, //DIB
 	{ "nativeConnect",					"(JIIIIILjava/lang/String;)I", (void *) nativeConnect },
 	{ "nativeRelease",					"(J)I", (void *) nativeRelease },
 

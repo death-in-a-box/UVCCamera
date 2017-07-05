@@ -135,6 +135,10 @@ void UVCCamera::clearCameraParams() {
  * カメラへ接続する
  */
 int UVCCamera::connect(int vid, int pid, int fd, int busnum, int devaddr, const char *usbfs) {
+	return connect(vid, pid, fd, busnum, devaddr, usbfs, 0);
+}
+
+int UVCCamera::connect(int vid, int pid, int fd, int busnum, int devaddr, const char *usbfs, int interface_number) {
 	ENTER();
 	uvc_error_t result = UVC_ERROR_BUSY;
 	if (!mDeviceHandle && fd) {
@@ -157,7 +161,7 @@ int UVCCamera::connect(int vid, int pid, int fd, int busnum, int devaddr, const 
 		result = uvc_get_device_with_fd(mContext, &mDevice, vid, pid, NULL, fd, busnum, devaddr);
 		if (LIKELY(!result)) {
 			// カメラのopen処理
-			result = uvc_open(mDevice, &mDeviceHandle);
+			result = uvc_open_dib(mDevice, &mDeviceHandle, interface_number);
 			if (LIKELY(!result)) {
 				// open出来た時
 #if LOCAL_DEBUG

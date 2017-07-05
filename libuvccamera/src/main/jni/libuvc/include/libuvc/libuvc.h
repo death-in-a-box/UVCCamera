@@ -544,6 +544,7 @@ uvc_error_t uvc_find_device2(uvc_context_t *ctx, uvc_device_t **dev, int vid,
 uvc_error_t uvc_get_device_with_fd(uvc_context_t *ctx, uvc_device_t **device,
 		int vid, int pid, const char *serial, int fd, int busnum, int devaddr);
 
+uvc_error_t uvc_open_dib(uvc_device_t *dev, uvc_device_handle_t **devh, int interface_number);
 uvc_error_t uvc_open(uvc_device_t *dev, uvc_device_handle_t **devh);
 void uvc_close(uvc_device_handle_t *devh);
 // XXX

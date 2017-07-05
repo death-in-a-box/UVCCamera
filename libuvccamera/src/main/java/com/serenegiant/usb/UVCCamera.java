@@ -181,6 +181,38 @@ public class UVCCamera {
     	mSupportedSize = null;
 	}
 
+
+	/**
+	 * connect to a UVC camera
+	 * USB permission is necessary before this method is called
+	 * @param ctrlBlock
+	 * @param interface_number
+	 */
+	public synchronized void open(final UsbControlBlock ctrlBlock, int interface_number) {
+		int result;
+		try {
+			mCtrlBlock = ctrlBlock.clone();
+			result = nativeConnectDIB(mNativePtr,
+					mCtrlBlock.getVenderId(), mCtrlBlock.getProductId(),
+					mCtrlBlock.getFileDescriptor(),
+					mCtrlBlock.getBusNum(),
+					mCtrlBlock.getDevNum(),
+					getUSBFSName(mCtrlBlock),
+					interface_number);
+		} catch (final Exception e) {
+			Log.w(TAG, e);
+			result = -1;
+		}
+		if (result != 0) {
+			throw new UnsupportedOperationException("open failed:result=" + result);
+		}
+		if (mNativePtr != 0 && TextUtils.isEmpty(mSupportedSize)) {
+			mSupportedSize = nativeGetSupportedSize(mNativePtr);
+		}
+		nativeSetPreviewSize(mNativePtr, DEFAULT_PREVIEW_WIDTH, DEFAULT_PREVIEW_HEIGHT,
+				DEFAULT_PREVIEW_MIN_FPS, DEFAULT_PREVIEW_MAX_FPS, DEFAULT_PREVIEW_MODE, DEFAULT_BANDWIDTH);
+	}
+
     /**
      * connect to a UVC camera
      * USB permission is necessary before this method is called
@@ -1033,6 +1065,7 @@ public class UVCCamera {
     private final native void nativeDestroy(final long id_camera);
 
     private final native int nativeConnect(long id_camera, int venderId, int productId, int fileDescriptor, int busNum, int devAddr, String usbfs);
+    private final native int nativeConnectDIB(long id_camera, int venderId, int productId, int fileDescriptor, int busNum, int devAddr, String usbfs, int interface_number);
     private static final native int nativeRelease(final long id_camera);
 
 	private static final native int nativeSetStatusCallback(final long mNativePtr, final IStatusCallback callback);

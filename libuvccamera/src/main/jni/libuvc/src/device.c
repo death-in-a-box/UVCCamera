@@ -66,12 +66,13 @@
 int uvc_already_open(uvc_context_t *ctx, struct libusb_device *usb_dev);
 void uvc_free_devh(uvc_device_handle_t *devh);
 
-uvc_error_t uvc_get_device_info(uvc_device_t *dev, uvc_device_info_t **info);
+uvc_error_t uvc_get_device_info(uvc_device_t *dev, uvc_device_info_t **info, int interface_number);
 uvc_error_t uvc_get_internal_info(uvc_device_t *dev, uvc_device_info_t **info);
 void uvc_free_device_info(uvc_device_info_t *info);
 
-uvc_error_t uvc_scan_control_num(uvc_device_info_t *info, int *inter_num);
-uvc_error_t uvc_scan_control(uvc_device_t *dev, uvc_device_info_t *info);
+uvc_error_t uvc_interface_indices(uvc_device_t *dev, uvc_device_info_t *info, int** interface_indices, int* size);
+uvc_error_t uvc_control_number(uvc_device_info_t *info, int *inter_num);
+uvc_error_t uvc_scan_control(uvc_device_t *dev, uvc_device_info_t *info, int interface_number);
 uvc_error_t uvc_parse_vc(uvc_device_t *dev, uvc_device_info_t *info,
 		const unsigned char *block, size_t block_size);
 uvc_error_t uvc_parse_vc_extension_unit(uvc_device_t *dev,
@@ -269,6 +270,19 @@ uint8_t uvc_get_device_address(uvc_device_t *dev) {
  * @return Error opening device or SUCCESS
  */
 uvc_error_t uvc_open(uvc_device_t *dev, uvc_device_handle_t **devh) {
+    return uvc_open_dib(dev, devh, 0);
+}
+
+/** @brief Open a UVC device on desired interface
+ * @ingroup device
+ *
+ * @param dev Device to open
+ * @param[out] devh Handle on opened device
+ * @param interface_number desired interface
+ * @return Error opening device or SUCCESS
+ */
+uvc_error_t uvc_open_dib(uvc_device_t *dev, uvc_device_handle_t **devh, int interface_number) {
+    // DIB - added interface_number
 	uvc_error_t ret;
 	struct libusb_device_handle *usb_devh;
 	uvc_device_handle_t *internal_devh;
@@ -290,7 +304,7 @@ uvc_error_t uvc_open(uvc_device_t *dev, uvc_device_handle_t **devh) {
 	internal_devh->dev = dev;
 	internal_devh->usb_devh = usb_devh;
 	internal_devh->reset_on_release_if = 0;	// XXX
-	ret = uvc_get_device_info(dev, &(internal_devh->info));
+	ret = uvc_get_device_info(dev, &(internal_devh->info), interface_number);
 	pthread_mutex_init(&internal_devh->status_mutex, NULL);	// XXX saki
 
 	if (UNLIKELY(ret != UVC_SUCCESS))
@@ -360,11 +374,15 @@ fail2:
 	return ret;
 }
 
-/**
+/** DIB
+ * @internal
+ * @brief Returns a device info for a device
+ * @ingroup device
  *
+ * @param dev Device to parse descriptor for
+ * @param info Where to store a pointer to the new info struct
  */
 uvc_error_t uvc_get_internal_info(uvc_device_t *dev, uvc_device_info_t **info) {
-    uvc_error_t ret;
     uvc_device_info_t *internal_info;
 
     UVC_ENTER();
@@ -386,8 +404,8 @@ uvc_error_t uvc_get_internal_info(uvc_device_t *dev, uvc_device_info_t **info) {
 
     *info = internal_info;
 
-    UVC_EXIT(ret);
-    return ret;
+    UVC_EXIT(UVC_SUCCESS);
+    return UVC_SUCCESS;
 }
 
 /**
@@ -399,7 +417,8 @@ uvc_error_t uvc_get_internal_info(uvc_device_t *dev, uvc_device_info_t **info) {
  * @param dev Device to parse descriptor for
  * @param info Where to store a pointer to the new info struct
  */
-uvc_error_t uvc_get_device_info(uvc_device_t *dev, uvc_device_info_t **info) {
+uvc_error_t uvc_get_device_info(uvc_device_t *dev, uvc_device_info_t **info, int interface_number) {
+    // DIB - added interface_number
 	uvc_error_t ret;
 	uvc_device_info_t *internal_info;
 
@@ -411,7 +430,7 @@ uvc_error_t uvc_get_device_info(uvc_device_t *dev, uvc_device_info_t **info) {
         return ret;
     }
 
-	ret = uvc_scan_control(dev, internal_info);
+	ret = uvc_scan_control(dev, internal_info, interface_number);
 	if (UNLIKELY(ret)) {
 		uvc_free_device_info(internal_info);
 		UVC_EXIT(ret);
@@ -920,57 +939,78 @@ uvc_error_t uvc_release_if(uvc_device_handle_t *devh, int idx) {
 	return ret;
 }
 
-/**
- *
+// DIB
+/** @internal
+ * Find a device's VideoControl interfaces
+ * @ingroup device
  */
-uvc_error_t uvc_scan_control_num(uvc_device_info_t *info, int *inter_num) {
-	const struct libusb_interface_descriptor *if_desc;
-	int interface_idx;
-	int interface_counter;
+uvc_error_t uvc_interface_indices(uvc_device_t *dev, uvc_device_info_t *info, int **interface_indices, int *size) {
+    const struct libusb_interface_descriptor *if_desc;
+    int interface_idx;
+    int interface_counter;
+    int *_interface_indices;
 
-	UVC_ENTER();
+    UVC_ENTER();
 
-	if_desc = NULL;
-	interface_counter = 0;
+    if_desc = NULL;
+    interface_counter = 0;
+    _interface_indices = calloc(info->config->bNumInterfaces, sizeof(int));
 
-	if (LIKELY(info && info->config)) {	// XXX add to avoid crash
-		MARK("bNumInterfaces=%d", info->config->bNumInterfaces);
-		for (interface_idx = 0; interface_idx < info->config->bNumInterfaces; ++interface_idx) {
-			if_desc = &info->config->interface[interface_idx].altsetting[0];
-			MARK("interface_idx=%d:bInterfaceClass=%02x,bInterfaceSubClass=%02x", interface_idx, if_desc->bInterfaceClass, if_desc->bInterfaceSubClass);
-			if (if_desc->bInterfaceClass == LIBUSB_CLASS_VIDEO/*14*/ && if_desc->bInterfaceSubClass == 1) // Video, Control
-				interface_counter++;
+    if (LIKELY(info && info->config)) {	// XXX add to avoid crash
+        for (interface_idx = 0; interface_idx < info->config->bNumInterfaces; ++interface_idx) {
+            if_desc = &info->config->interface[interface_idx].altsetting[0];
+            MARK("interface_idx=%d:bInterfaceClass=%02x,bInterfaceSubClass=%02x", interface_idx, if_desc->bInterfaceClass, if_desc->bInterfaceSubClass);
+            if (if_desc->bInterfaceClass == LIBUSB_CLASS_VIDEO/*14*/ && if_desc->bInterfaceSubClass == 1) { // Video, Control
+                _interface_indices[interface_counter] = interface_idx;
+                interface_counter++;
+            }
 
-			// Another TIS camera hack.
-			else if (if_desc->bInterfaceClass == 255 && if_desc->bInterfaceSubClass == 1) {
-				uvc_device_descriptor_t* dev_desc;
-				int haveTISCamera = 0;
-				uvc_get_device_descriptor (dev, &dev_desc);
-				if (dev_desc->idVendor == 0x199e && dev_desc->idProduct == 0x8101) {
-					haveTISCamera = 1;
-				}
-				uvc_free_device_descriptor (dev_desc);
-				if (haveTISCamera) {
-					interface_counter++;
-				}
-			}
-			if_desc = NULL;
-		}
-	}
-	*inter_num = interface_counter;
+                // Another TIS camera hack.
+            else if (if_desc->bInterfaceClass == 255 && if_desc->bInterfaceSubClass == 1) {
+                uvc_device_descriptor_t* dev_desc;
+                int haveTISCamera = 0;
+                uvc_get_device_descriptor (dev, &dev_desc);
+                if (dev_desc->idVendor == 0x199e && dev_desc->idProduct == 0x8101) {
+                    haveTISCamera = 1;
+                }
+                uvc_free_device_descriptor (dev_desc);
+                if (haveTISCamera) {
+                    _interface_indices[interface_counter] = interface_idx;
+                    interface_counter++;
+                }
+            }
+            if_desc = NULL;
+        }
+    }
+    _interface_indices = realloc(_interface_indices, interface_counter * sizeof(int));
+    *size = interface_counter;
+    *interface_indices = _interface_indices;
 
-	UVC_EXIT(ret);
-	return ret;
+    UVC_EXIT(UVC_SUCCESS);
+    return UVC_SUCCESS;
+}
+
+// DIB
+/** @internal
+ * Returns the amount of a device's VideoControl interfaces
+ * @ingroup device
+ */
+uvc_error_t uvc_control_number(uvc_device_info_t *info, int *inter_num) {
+    // TODO
+    return UVC_SUCCESS;
 }
 
 /** @internal
  * Find a device's VideoControl interface and process its descriptor
  * @ingroup device
  */
-uvc_error_t uvc_scan_control(uvc_device_t *dev, uvc_device_info_t *info) {
+uvc_error_t uvc_scan_control(uvc_device_t *dev, uvc_device_info_t *info, int interface_number) {
+    // DIB - added interface_number
 	const struct libusb_interface_descriptor *if_desc;
 	uvc_error_t parse_ret, ret;
 	int interface_idx;
+	int *interface_indices;
+    int interfaces_size = 0;
 	const unsigned char *buffer;
 	size_t buffer_left, block_size;
 
@@ -979,31 +1019,12 @@ uvc_error_t uvc_scan_control(uvc_device_t *dev, uvc_device_info_t *info) {
 	ret = UVC_SUCCESS;
 	if_desc = NULL;
 
-	if (LIKELY(info && info->config)) {	// XXX add to avoid crash
-		MARK("bNumInterfaces=%d", info->config->bNumInterfaces);
-		for (interface_idx = 0; interface_idx < info->config->bNumInterfaces; ++interface_idx) {
-			if_desc = &info->config->interface[interface_idx].altsetting[0];
-			MARK("interface_idx=%d:bInterfaceClass=%02x,bInterfaceSubClass=%02x", interface_idx, if_desc->bInterfaceClass, if_desc->bInterfaceSubClass);
-			// select first found Video control
-			if (if_desc->bInterfaceClass == LIBUSB_CLASS_VIDEO/*14*/ && if_desc->bInterfaceSubClass == 1) // Video, Control
-				break;
-
-			// Another TIS camera hack.
-			if (if_desc->bInterfaceClass == 255 && if_desc->bInterfaceSubClass == 1) {
-				uvc_device_descriptor_t* dev_desc;
-				int haveTISCamera = 0;
-				uvc_get_device_descriptor (dev, &dev_desc);
-				if (dev_desc->idVendor == 0x199e && dev_desc->idProduct == 0x8101) {
-					haveTISCamera = 1;
-				}
-				uvc_free_device_descriptor (dev_desc);
-				if (haveTISCamera) {
-					break;
-				}
-			}
-			if_desc = NULL;
-		}
-	}
+    uvc_interface_indices(dev, info, &interface_indices, &interfaces_size);
+    if (interfaces_size > 0 && interfaces_size <= interface_number + 1) {
+        interface_idx = interface_indices[interface_number];
+        if_desc = &info->config->interface[interface_idx].altsetting[interface_number];
+    }
+    free(interface_indices);
 
 	if (UNLIKELY(!if_desc)) {
 		UVC_EXIT(UVC_ERROR_INVALID_DEVICE);
