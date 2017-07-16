@@ -1455,6 +1455,7 @@ int API_EXPORTED libusb_submit_transfer(struct libusb_transfer *transfer) {
 		r = add_to_flying_list(itransfer);
 		if (LIKELY(r == LIBUSB_SUCCESS)) {
 			r = usbi_backend->submit_transfer(itransfer);
+            LOGE("r = %d", r);
 		}
 		if (UNLIKELY(r != LIBUSB_SUCCESS)) {
 			list_del(&itransfer->list);

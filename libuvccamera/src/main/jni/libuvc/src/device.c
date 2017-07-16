@@ -315,6 +315,8 @@ uvc_error_t uvc_open_dib(uvc_device_t *dev, uvc_device_handle_t **devh, int inte
 #endif
 	UVC_DEBUG("claiming control interface %d",
 			internal_devh->info->ctrl_if.bInterfaceNumber);
+    LOGE("claiming control interface %d",
+			internal_devh->info->ctrl_if.bInterfaceNumber);
 	ret = uvc_claim_if(internal_devh,
 			internal_devh->info->ctrl_if.bInterfaceNumber);
 	if (UNLIKELY(ret != UVC_SUCCESS))
@@ -325,6 +327,7 @@ uvc_error_t uvc_open_dib(uvc_device_t *dev, uvc_device_handle_t **devh, int inte
 
 	if (internal_devh->info->ctrl_if.bEndpointAddress) {
 		UVC_DEBUG("status check transfer:bEndpointAddress=0x%02x", internal_devh->info->ctrl_if.bEndpointAddress);
+		LOGE("status check transfer:bEndpointAddress=0x%02x", internal_devh->info->ctrl_if.bEndpointAddress);
 		internal_devh->status_xfer = libusb_alloc_transfer(0);
 		if (UNLIKELY(!internal_devh->status_xfer)) {
 			ret = UVC_ERROR_NO_MEM;
@@ -337,6 +340,7 @@ uvc_error_t uvc_open_dib(uvc_device_t *dev, uvc_device_handle_t **devh, int inte
 				_uvc_status_callback, internal_devh, 0);
 		ret = libusb_submit_transfer(internal_devh->status_xfer);
 		UVC_DEBUG("libusb_submit_transfer() = %d", ret);
+		LOGE("libusb_submit_transfer() = %d", ret);
 
 		if (UNLIKELY(ret)) {
 			LOGE("device has a status interrupt endpoint, but unable to read from it");
@@ -1020,10 +1024,15 @@ uvc_error_t uvc_scan_control(uvc_device_t *dev, uvc_device_info_t *info, int int
 	if_desc = NULL;
 
     uvc_interface_indices(dev, info, &interface_indices, &interfaces_size);
-    if (interfaces_size > 0 && interfaces_size <= interface_number + 1) {
-        interface_idx = interface_indices[interface_number];
-        if_desc = &info->config->interface[interface_idx].altsetting[interface_number];
-    }
+
+	LOGE("interface size: %d", interfaces_size);
+    if (interface_number < 0 || interface_number > interfaces_size - 1) {
+		free(interface_indices);
+		LOGE("INTERFACE NUMBER %d IS OUT OF BOUNDS", interface_number);
+		return UVC_ERROR_INVALID_PARAM;
+	}
+	interface_idx = interface_indices[interface_number];
+	if_desc = &info->config->interface[interface_idx].altsetting[interface_number];
     free(interface_indices);
 
 	if (UNLIKELY(!if_desc)) {

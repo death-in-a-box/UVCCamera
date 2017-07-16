@@ -2256,6 +2256,7 @@ static int submit_bulk_transfer(struct usbi_transfer *itransfer) {
 			} else {
 				usbi_err(TRANSFER_CTX(transfer),
 					"submiturb failed error %d errno=%d", r, errno);
+				LOGE("submiturb failed error %d errno=%d", r, errno);
 				r = LIBUSB_ERROR_IO;
 			}
 
